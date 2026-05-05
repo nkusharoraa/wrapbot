@@ -1,0 +1,653 @@
+{
+  "name": "Posters Email 01022026",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -992
+      ],
+      "id": "cc0e3ed1-d47d-4d9c-a991-598e04869b39",
+      "name": "When clicking \u2018Execute workflow\u2019"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "=",
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1568,
+        -896
+      ],
+      "id": "c0cc03cc-d435-4d24-aa71-7728342ecd54",
+      "name": "Files",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1792,
+        -896
+      ],
+      "id": "75614fa5-5d80-419c-a858-10dbabe58c54",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fileSelector": "/data/invoices/134224655172020487.pdf",
+        "options": {
+          "dataPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        224,
+        -992
+      ],
+      "id": "deb5b03a-b143-4c83-91e0-8fd6ee3a7908",
+      "name": "Read/Write Files from Disk",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        448,
+        -992
+      ],
+      "id": "e67f774b-1694-464d-8cbe-d72ba6672e24",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json.text || '';\nconst items = [];\n\n// 1) Extract product titles from each line item\n// We first grab the full description cell between \"Wrap & Wish\" and \"HSN:\"\nconst reDesc = /Wrap & Wish([\\s\\S]*?)HSN:/gi;\nlet m;\n\nwhile ((m = reDesc.exec(text)) !== null) {\n  let fullDesc = m[1].replace(/\\s+/g, ' ').trim(); // normalize spaces\n\n  // Prefer cutting at explicit suffixes:\n  // \"Wall Posters Set\", \"Wall Split Posters Set\", \"Wall Art Frame\"\n  const explicitSuffix = /\\sWall(?: Split)? (Posters Set|Art Frame)/i;\n  const explicitMatch = fullDesc.match(explicitSuffix);\n\n  let titlePart;\n\n  if (explicitMatch) {\n    // Cut before the explicit suffix\n    titlePart = fullDesc.slice(0, explicitMatch.index).trim();\n  } else {\n    // Fallback: use last \" Wall...\" pattern\n    const wallRegex = /\\sWall(?: Split)?(?: Posters Set| Art Frame| Posters)?/gi;\n    let lastWallIndex = -1;\n    let wallMatch;\n    while ((wallMatch = wallRegex.exec(fullDesc)) !== null) {\n      lastWallIndex = wallMatch.index;\n    }\n    titlePart = lastWallIndex === -1\n      ? fullDesc\n      : fullDesc.slice(0, lastWallIndex).trim();\n  }\n\n  // Remove leading brand if present\n  titlePart = titlePart.replace(/^Wrap & Wish\\s*/i, '').trim();\n\n  // Remove trailing \"Split\" if present\n  titlePart = titlePart.replace(/\\s+Split\\b/i, '').trim();\n\n  if (titlePart) {\n    items.push({\n      searchTitle: titlePart,\n      index: m.index,\n      fullDesc,\n    });\n  }\n}\n\n// 2) For each item, look ahead for size, SKU, qty, and category\nfor (const item of items) {\n  const slice = text.slice(item.index);\n  let size = 'OTHER';\n  let sku = '';\n  let qty = 1;\n\n  // (A3 Size, ...) or (A4 Size, ...)\n  const sizeMatch = slice.match(/\\(A[34]\\s+Size/i);\n  if (sizeMatch) {\n    const upper = sizeMatch[0].toUpperCase();\n    if (upper.includes('A3')) size = 'A3';\n    else if (upper.includes('A4')) size = 'A4';\n  }\n\n  // SKU: last (...) before HSN:, allow whitespace/newlines before HSN\n  const skuMatch = slice.match(/\\(\\s*([^)]+?)\\s*\\)[\\s\\r\\n]*HSN:/i);\n  if (skuMatch) {\n    sku = skuMatch[1].trim();\n  }\n\n  // Qty detection\n  // 1) Markdown-table style: \"256.19 | 2 | 512.38\"\n  let qtyMatch = slice.match(/\\|\\s*\\d+(\\.\\d+)?\\s*\\|\\s*(\\d+)\\s*\\|/);\n\n  if (!qtyMatch) {\n    // 2) Plain-text style: \"\u20b9256.19 2 \u20b9512.38\"\n    qtyMatch = slice.match(/\u20b9?\\s*\\d+(\\.\\d+)?\\s+(\\d+)\\s+\u20b9?\\s*\\d+(\\.\\d+)?/);\n  }\n\n  if (qtyMatch && qtyMatch[2]) {\n    qty = parseInt(qtyMatch[2], 10) || 1;\n  }\n\n  // Category: music if description contains either phrase\n  const descLower = item.fullDesc.toLowerCase();\n  const isMusic =\n    descLower.includes('vintage music & marvel room decor') ||\n    descLower.includes('vintage designs & room decor');\n\n  const category = isMusic ? 'music' : 'new';\n\n  item.size = size;\n  item.sku = sku;\n  item.qty = qty;\n  item.category = category;\n}\n\n// 3) Aggregate by SKU across all invoices, summing qty\nconst bySku = new Map(); // sku -> {title, size, totalQty, category}\n\nfor (const it of items) {\n  const key = it.sku || it.searchTitle; // fallback to title if sku missing\n  if (!bySku.has(key)) {\n    bySku.set(key, {\n      title: it.searchTitle,\n      size: it.size,\n      totalQty: it.qty,\n      category: it.category,\n    });\n  } else {\n    const prev = bySku.get(key);\n    prev.totalQty += it.qty;\n    // keep existing category\n    bySku.set(key, prev);\n  }\n}\n\n// 4) Expand to one item per unit (no qty field in output)\nconst output = [];\n\nfor (const [sku, data] of bySku.entries()) {\n  const { title, size, totalQty, category } = data;\n\n  for (let i = 0; i < totalQty; i++) {\n    output.push({\n      json: {\n        searchTitle: title,\n        size: size,\n        sku: sku,\n        category: category,   // \"music\" or \"new\"\n      },\n    });\n  }\n}\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        -992
+      ],
+      "id": "f9d3a524-1e0d-4be5-9918-53c864915b9b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "=",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "={{ $json.id }}",
+            "mode": "id"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {
+          "fields": [
+            "id",
+            "name"
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1568,
+        -704
+      ],
+      "id": "71ff31c1-29fb-459a-902d-c4f9c7d63873",
+      "name": "Files1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1792,
+        -704
+      ],
+      "id": "7ab1c32b-ab5f-499e-8a63-ec401f7ed0de",
+      "name": "Download file1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dd89548b-29e9-4e49-809a-60963462af0b",
+              "leftValue": "={{ $json.size }}",
+              "rightValue": "A4",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        -800
+      ],
+      "id": "66178d7b-0ecf-4d34-8a10-75fd0a4f24c2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $json[\"searchTitle\"] }}' and mimeType = 'application/vnd.google-apps.folder'",
+        "returnAll": true,
+        "filter": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1344,
+        -704
+      ],
+      "id": "85dbb40c-8853-437a-bb9c-2fdcff1e3d42",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $json[\"searchTitle\"] }}' and mimeType = 'application/vnd.google-apps.folder'",
+        "returnAll": true,
+        "filter": {},
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1344,
+        -896
+      ],
+      "id": "c30c94ec-1d04-4ccb-8077-f654893af34b",
+      "name": "Search files and folders1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "L2M9b65eCjCcHKZm",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "85c49c50-5009-4b94-9be8-c1b69a0f3185",
+              "leftValue": "={{ $json.category }}",
+              "rightValue": "music",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        -992
+      ],
+      "id": "f3c62b49-1ede-413e-b407-6dd8b5783644",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dd89548b-29e9-4e49-809a-60963462af0b",
+              "leftValue": "={{ $json.size }}",
+              "rightValue": "A4",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        -1184
+      ],
+      "id": "379e26f8-9b93-4452-a65a-f0d93af2148c",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "sendTo": "25bap347@satyawatie.du.ac.in",
+        "subject": "=A4 Music Posters",
+        "message": "={{ JSON.stringify($json.data, null, 2) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1568,
+        -1280
+      ],
+      "id": "bd4f9419-f833-4d7a-8a00-3b885c19b787",
+      "name": "Send a message2",
+      "webhookId": "7c0d0b87-2a0a-4036-82c8-383e0a6ab97e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "XotxJz7VzFxTXnRQ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "=data",
+        "include": "specifiedFields",
+        "fieldsToInclude": "searchTitle, sku",
+        "options": {
+          "includeBinaries": true
+        }
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        -1280
+      ],
+      "id": "d21a6b6e-5503-412d-80cc-958cc9472211",
+      "name": "Aggregate2"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "=data",
+        "include": "specifiedFields",
+        "fieldsToInclude": "searchTitle, sku",
+        "options": {
+          "includeBinaries": true
+        }
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        1344,
+        -1088
+      ],
+      "id": "7624d8cf-d7f5-445b-a22a-0c2f9c965dec",
+      "name": "Aggregate3"
+    },
+    {
+      "parameters": {
+        "sendTo": "25bap347@satyawatie.du.ac.in",
+        "subject": "=A3 Music Posters",
+        "message": "={{ JSON.stringify($json.data, null, 2) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1568,
+        -1088
+      ],
+      "id": "bc616f93-77c1-4f9c-9195-208c3c184961",
+      "name": "Send a message3",
+      "webhookId": "7c0d0b87-2a0a-4036-82c8-383e0a6ab97e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "XotxJz7VzFxTXnRQ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileSelector": "=/data/print_queue/A4/{{ $json.name }}",
+        "options": {
+          "dataPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        -896
+      ],
+      "id": "write-a4-images",
+      "name": "Write A4 Images",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileSelector": "=/data/print_queue/A3/{{ $json.name }}",
+        "options": {
+          "dataPropertyName": "data"
+        }
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        -704
+      ],
+      "id": "write-a3-images",
+      "name": "Write A3 Images",
+      "alwaysOutputData": false
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking \u2018Execute workflow\u2019": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Files": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Write A4 Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Files1": {
+      "main": [
+        [
+          {
+            "node": "Download file1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file1": {
+      "main": [
+        [
+          {
+            "node": "Write A3 Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Files1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search files and folders1": {
+      "main": [
+        [
+          {
+            "node": "Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Aggregate2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Aggregate3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate2": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate3": {
+      "main": [
+        [
+          {
+            "node": "Send a message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2c54b612-d8a0-4cbe-9c31-bca7cbdb575e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "479908ba678fe310ba7e10846c247c56d3f0115f4bb97ba097e4cc544a40313f"
+  },
+  "id": "HF0m14IJ1ifRwZtq",
+  "tags": []
+}

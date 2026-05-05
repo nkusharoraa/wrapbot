@@ -1,0 +1,20 @@
+# Secrets and config
+amazon_config.json
+credentials.json
+token.json
+.env
+
+# PyInstaller output
+dist/
+build/
+*.spec.bak
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Customer data
+invoices/
+*.pdf
