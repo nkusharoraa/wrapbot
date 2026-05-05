@@ -82,17 +82,19 @@ class App:
         table_frame = tk.Frame(root)
         table_frame.pack(padx=10, pady=5, fill=tk.BOTH)
 
-        columns = ("select", "title", "size", "category")
+        columns = ("select", "title", "size", "pack", "category")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
-        
+
         self.tree.heading("select", text="Print?")
         self.tree.heading("title", text="Item Title")
         self.tree.heading("size", text="Size")
+        self.tree.heading("pack", text="Pack")
         self.tree.heading("category", text="Category")
-        
+
         self.tree.column("select", width=60, anchor=tk.CENTER)
-        self.tree.column("title", width=400)
-        self.tree.column("size", width=80, anchor=tk.CENTER)
+        self.tree.column("title", width=360)
+        self.tree.column("size", width=60, anchor=tk.CENTER)
+        self.tree.column("pack", width=60, anchor=tk.CENTER)
         self.tree.column("category", width=120, anchor=tk.CENTER)
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -353,7 +355,7 @@ class App:
             
         by_sku = {}
         for it in parsed_items:
-            key = it['sku'] or it['searchTitle']
+            key = (it['sku'] or it['searchTitle'], it['size'], it['pack'])
             if key not in by_sku:
                 by_sku[key] = {
                     'title': it['searchTitle'],
@@ -781,10 +783,12 @@ class App:
 
         # Populate tree with all items, selected by default
         for item in self.current_items:
+            pack_display = f"×{item['pack']}" if item.get('pack') else "—"
             self.tree.insert("", tk.END, values=(
-                "✔", 
-                item['searchTitle'], 
-                item['size'], 
+                "✔",
+                item['searchTitle'],
+                item['size'],
+                pack_display,
                 item['category'].upper()
             ))
 
