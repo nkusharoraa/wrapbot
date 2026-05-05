@@ -117,7 +117,6 @@ class App:
         self.tree.column("ship_by", width=100, anchor=tk.CENTER)
 
         self.tree.tag_configure("shipped", background="#FFF3CD")
-        self.tree.tag_configure("cancelled", background="#FADADD", foreground="#8B0000")
         self.tree.tag_configure("due_today", background="#D4EDDA")
         self.tree.tag_configure("overdue", background="#FFE0B2")
         
@@ -141,9 +140,6 @@ class App:
             column = self.tree.identify_column(event.x)
             if column == "#1":  # 'select' column
                 item_id = self.tree.identify_row(event.y)
-                tags = self.tree.item(item_id, "tags")
-                if "cancelled" in tags:
-                    return  # cancelled orders cannot be queued for printing
                 current_val = self.tree.item(item_id, "values")[0]
                 new_val = " " if current_val == "✔" else "✔"
 
@@ -801,9 +797,7 @@ class App:
 
             self.log(f"Parsed: '{clean_title}' | Size: {size} | Cat: {category} | Pack: {pack_val} | Qty: {qty}")
 
-            # Cancelled orders: show one row only (for warning purposes, not printing)
-            copies = 1 if order_status == 'Canceled' else qty
-            for _ in range(copies):
+            for _ in range(qty):
                 output.append({
                     'searchTitle': clean_title,
                     'size': size,
@@ -822,8 +816,7 @@ class App:
             self.tree.delete(item)
 
         today_str = datetime.now().strftime("%Y-%m-%d")
-        cancelled_titles = []
-        unshipped_dates = set()  # collect unique ship dates for the combobox
+        unshipped_dates = set()
 
         for item in self.current_items:
             pack_display = f"×{item['pack']}" if item.get('pack') else "—"
@@ -831,39 +824,28 @@ class App:
             raw_date = item.get('latest_ship_date', '')
             ship_date_str = raw_date[:10] if raw_date else ""
 
-            if order_status == 'Canceled':
-                # Only show cancelled orders whose ship-by date is today or already past
-                if ship_date_str and ship_date_str > today_str:
-                    continue  # future ship date — not relevant yet
-                ship_by_display = "CANCELLED"
-                tag = ("cancelled",)
-                check = " "
-                cancelled_titles.append(item['searchTitle'])
-
-            elif order_status == 'Shipped':
+            if order_status == 'Shipped':
                 ship_by_display = "SHIPPED"
                 tag = ("shipped",)
-                check = "✔"
-
-            else:  # Unshipped
+            else:
                 if ship_date_str:
                     try:
-                        sd = datetime.strptime(ship_date_str, "%Y-%m-%d")
-                        ship_by_display = sd.strftime("%d %b %Y")
+                        ship_by_display = datetime.strptime(ship_date_str, "%Y-%m-%d").strftime("%d %b %Y")
                     except ValueError:
                         ship_by_display = ship_date_str
                     unshipped_dates.add(ship_date_str)
-                    if ship_date_str <= today_str:
-                        tag = ("overdue",) if ship_date_str < today_str else ("due_today",)
+                    if ship_date_str < today_str:
+                        tag = ("overdue",)
+                    elif ship_date_str == today_str:
+                        tag = ("due_today",)
                     else:
                         tag = ()
                 else:
                     ship_by_display = "—"
                     tag = ()
-                check = "✔"
 
             self.tree.insert("", tk.END, tags=tag, values=(
-                check,
+                "✔",
                 item['searchTitle'],
                 item['size'],
                 pack_display,
@@ -871,7 +853,7 @@ class App:
                 ship_by_display,
             ))
 
-        # Populate date combobox with sorted unshipped dates; default to nearest (earliest)
+        # Populate date combobox with sorted unique ship dates; default to nearest
         sorted_dates = sorted(unshipped_dates)
         combo_values = []
         for d in sorted_dates:
@@ -884,32 +866,14 @@ class App:
             self.ship_date_combo['values'] = combo_values
             if combo_values:
                 self.ship_date_combo.config(state="readonly")
-                self.ship_date_var.set(combo_values[0])  # nearest date
-                self.select_by_date()  # auto-apply
+                self.ship_date_var.set(combo_values[0])
+                self.select_by_date()
 
         self.update_button_counts()
 
-        active_items = [x for x in self.current_items if x.get('order_status') != 'Canceled']
-        cancelled_count = len(cancelled_titles)
-        due_count = sum(
-            1 for x in self.current_items
-            if x.get('order_status') not in ('Canceled', 'Shipped')
-            and (x.get('latest_ship_date', '')[:10] or 'z') <= today_str
-        )
-
-        summary_parts = [f"Nearest date: {combo_values[0] if combo_values else '—'}", f"Total active: {len(active_items)}"]
-        if cancelled_count:
-            summary_parts.append(f"⚠ {cancelled_count} Cancelled")
-        self.summary_label.config(text="  |  ".join(summary_parts), fg="#CC0000" if cancelled_count else "#555555")
-
         music_items = [x for x in self.current_items if x['category'] == 'music']
-        self.log(f"[{source}] Total active items: {len(active_items)} | Due today/overdue: {due_count} | Music: {len(music_items)}")
-
-        if cancelled_titles:
-            self.log(f"⚠ WARNING: {len(cancelled_titles)} CANCELLED order(s) with past/today ship date — check if already printed:", is_error=True)
-            for t in cancelled_titles:
-                self.log(f"   CANCELLED: {t}", is_error=True)
-
+        self.log(f"[{source}] Total items: {len(self.current_items)} | Music: {len(music_items)}")
+        self.summary_label.config(text=f"Nearest: {combo_values[0] if combo_values else '—'}  |  Total: {len(self.current_items)}", fg="#555555")
         self.log("Ready for printing! Load paper and press Print button.")
 
     def select_by_date(self):
@@ -931,14 +895,9 @@ class App:
         for child in self.tree.get_children():
             vals = list(self.tree.item(child, "values"))
             ship_by_display = vals[5]  # "DD Mon", "SHIPPED", "CANCELLED", "—"
-            tags = self.tree.item(child, "tags")
-
-            if "cancelled" in tags:
-                continue  # never toggle cancelled rows
-
             # Determine the item's date from the matching current_items entry
             title = vals[1]
-            matched = next((x for x in self.current_items if x['searchTitle'] == title and x.get('order_status') != 'Canceled'), None)
+            matched = next((x for x in self.current_items if x['searchTitle'] == title), None)
             if not matched:
                 continue
 
