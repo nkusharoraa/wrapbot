@@ -1,0 +1,32 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build exe
+        run: pyinstaller WrapBot.spec
+
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>$null; true
+          gh release create latest dist/WrapBot.exe `
+            --title "WrapBot latest" `
+            --notes "Built from ${{ github.sha }}" `
+            --prerelease
