@@ -64,6 +64,10 @@ class App:
         self.btn_fetch = tk.Button(btn_frame, text="Load Orders", command=self.start_fetch_orders, bg="#2C3E50", fg="white", font=("Arial", 10, "bold"))
         self.btn_fetch.pack(side=tk.LEFT, padx=(0, 5))
 
+        self.include_shipped_var = tk.BooleanVar(value=False)
+        self.chk_shipped = tk.Checkbutton(btn_frame, text="Inc. Sent", variable=self.include_shipped_var, font=("Arial", 9))
+        self.chk_shipped.pack(side=tk.LEFT, padx=(0, 5))
+
         self.btn_select = tk.Button(btn_frame, text="Load PDF (Fallback)", command=self.start_analyze, bg="#7F8C8D", fg="white", font=("Arial", 10))
         self.btn_select.pack(side=tk.LEFT, padx=5)
 
@@ -82,7 +86,7 @@ class App:
         table_frame = tk.Frame(root)
         table_frame.pack(padx=10, pady=5, fill=tk.BOTH)
 
-        columns = ("select", "title", "size", "pack", "category")
+        columns = ("select", "title", "size", "pack", "category", "status")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
 
         self.tree.heading("select", text="Print?")
@@ -90,12 +94,16 @@ class App:
         self.tree.heading("size", text="Size")
         self.tree.heading("pack", text="Pack")
         self.tree.heading("category", text="Category")
+        self.tree.heading("status", text="Status")
 
         self.tree.column("select", width=60, anchor=tk.CENTER)
-        self.tree.column("title", width=360)
+        self.tree.column("title", width=310)
         self.tree.column("size", width=60, anchor=tk.CENTER)
         self.tree.column("pack", width=60, anchor=tk.CENTER)
-        self.tree.column("category", width=120, anchor=tk.CENTER)
+        self.tree.column("category", width=110, anchor=tk.CENTER)
+        self.tree.column("status", width=90, anchor=tk.CENTER)
+
+        self.tree.tag_configure("shipped", background="#FFF3CD")
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
@@ -644,6 +652,8 @@ class App:
         self.btn_select.config(state=tk.DISABLED, bg="SystemButtonFace")
         if hasattr(self, 'btn_manual'):
             self.btn_manual.config(state=tk.DISABLED, bg="SystemButtonFace")
+        if hasattr(self, 'chk_shipped'):
+            self.chk_shipped.config(state=tk.DISABLED)
         self.btn_a4.config(state=tk.DISABLED, bg="SystemButtonFace")
         self.btn_a3.config(state=tk.DISABLED, bg="SystemButtonFace")
 
@@ -652,6 +662,8 @@ class App:
         self.btn_select.config(state=tk.NORMAL, bg="#7F8C8D", fg="white")
         if hasattr(self, 'btn_manual'):
             self.btn_manual.config(state=tk.NORMAL, bg="#8E44AD", fg="white")
+        if hasattr(self, 'chk_shipped'):
+            self.chk_shipped.config(state=tk.NORMAL)
         if a4_count > 0:
             self.btn_a4.config(state=tk.NORMAL, bg="#3498DB", fg="white")
         else:
@@ -678,8 +690,9 @@ class App:
 
             self.get_master_folders()
 
+            include_shipped = self.include_shipped_var.get()
             self.log("Connecting to Amazon SP-API...")
-            raw_items = amazon_api.fetch_all_pending_items()
+            raw_items = amazon_api.fetch_all_pending_items(include_shipped=include_shipped)
             self.log(f"Fetched {len(raw_items)} order line items from Amazon.")
 
             if not raw_items:
@@ -710,6 +723,7 @@ class App:
             full_title = raw.get('title', '')
             qty = int(raw.get('qty', 1))
             sku = raw.get('sku', '')
+            order_status = raw.get('order_status', 'Unshipped')
 
             # Strip 'Wrap & Wish' prefix if already present in title
             clean_title = re.sub(r'^Wrap\s*&\s*Wish\s*', '', full_title, flags=re.IGNORECASE).strip()
@@ -771,6 +785,7 @@ class App:
                     'pack': pack_val,
                     'sku': sku,
                     'category': category,
+                    'order_status': order_status,
                 })
 
         return output
@@ -784,12 +799,15 @@ class App:
         # Populate tree with all items, selected by default
         for item in self.current_items:
             pack_display = f"×{item['pack']}" if item.get('pack') else "—"
-            self.tree.insert("", tk.END, values=(
+            order_status = item.get('order_status', 'Unshipped')
+            tag = ("shipped",) if order_status == "Shipped" else ()
+            self.tree.insert("", tk.END, tags=tag, values=(
                 "✔",
                 item['searchTitle'],
                 item['size'],
                 pack_display,
-                item['category'].upper()
+                item['category'].upper(),
+                order_status.upper(),
             ))
 
         self.update_button_counts()
