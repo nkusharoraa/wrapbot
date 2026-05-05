@@ -144,7 +144,7 @@ def fetch_all_pending_items(include_shipped=False):
         statuses.append("Shipped")
 
     active_orders = get_unshipped_orders(config, access_token, statuses=statuses)
-    cancelled_orders = get_unshipped_orders(config, access_token, statuses=["Cancelled"], days_window=30)
+    cancelled_orders = get_unshipped_orders(config, access_token, statuses=["Canceled"], days_window=30)
     result = []
 
     for order in active_orders + cancelled_orders:
