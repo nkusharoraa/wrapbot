@@ -65,7 +65,7 @@ class App:
         self.btn_fetch.pack(side=tk.LEFT, padx=(0, 5))
 
         self.include_shipped_var = tk.BooleanVar(value=False)
-        self.chk_shipped = tk.Checkbutton(btn_frame, text="Inc. Sent", variable=self.include_shipped_var, font=("Arial", 9))
+        self.chk_shipped = tk.Checkbutton(btn_frame, text="Include Shipped", variable=self.include_shipped_var, font=("Arial", 9))
         self.chk_shipped.pack(side=tk.LEFT, padx=(0, 5))
 
         self.btn_select = tk.Button(btn_frame, text="Load PDF (Fallback)", command=self.start_analyze, bg="#7F8C8D", fg="white", font=("Arial", 10))
@@ -82,11 +82,25 @@ class App:
         self.btn_a3 = tk.Button(btn_frame, text="Print A3 [0]", command=lambda: self.start_print('A3'), font=("Arial", 10, "bold"), state=tk.DISABLED)
         self.btn_a3.pack(side=tk.LEFT, padx=5)
 
-        # UI Setup - Row 3: Selection Table
+        # UI Setup - Row 3: Date filter + order summary
+        filter_frame = tk.Frame(root)
+        filter_frame.pack(padx=10, pady=(0, 3), fill=tk.X)
+
+        tk.Label(filter_frame, text="Ship by:", font=("Arial", 9)).pack(side=tk.LEFT)
+        self.ship_date_var = tk.StringVar(value=datetime.now().strftime("%d/%m/%Y"))
+        self.ship_date_entry = tk.Entry(filter_frame, textvariable=self.ship_date_var, width=10, font=("Arial", 9))
+        self.ship_date_entry.pack(side=tk.LEFT, padx=(3, 5))
+        self.btn_select_due = tk.Button(filter_frame, text="Select Due", command=self.select_by_date, font=("Arial", 9), state=tk.DISABLED)
+        self.btn_select_due.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.summary_label = tk.Label(filter_frame, text="", font=("Arial", 9), fg="#555555")
+        self.summary_label.pack(side=tk.LEFT)
+
+        # UI Setup - Row 4: Selection Table
         table_frame = tk.Frame(root)
         table_frame.pack(padx=10, pady=5, fill=tk.BOTH)
 
-        columns = ("select", "title", "size", "pack", "category", "status")
+        columns = ("select", "title", "size", "pack", "category", "ship_by")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings", height=8)
 
         self.tree.heading("select", text="Print?")
@@ -94,16 +108,19 @@ class App:
         self.tree.heading("size", text="Size")
         self.tree.heading("pack", text="Pack")
         self.tree.heading("category", text="Category")
-        self.tree.heading("status", text="Status")
+        self.tree.heading("ship_by", text="Ship By")
 
         self.tree.column("select", width=60, anchor=tk.CENTER)
-        self.tree.column("title", width=310)
-        self.tree.column("size", width=60, anchor=tk.CENTER)
-        self.tree.column("pack", width=60, anchor=tk.CENTER)
-        self.tree.column("category", width=110, anchor=tk.CENTER)
-        self.tree.column("status", width=90, anchor=tk.CENTER)
+        self.tree.column("title", width=295)
+        self.tree.column("size", width=55, anchor=tk.CENTER)
+        self.tree.column("pack", width=55, anchor=tk.CENTER)
+        self.tree.column("category", width=105, anchor=tk.CENTER)
+        self.tree.column("ship_by", width=100, anchor=tk.CENTER)
 
         self.tree.tag_configure("shipped", background="#FFF3CD")
+        self.tree.tag_configure("cancelled", background="#FADADD", foreground="#8B0000")
+        self.tree.tag_configure("due_today", background="#D4EDDA")
+        self.tree.tag_configure("overdue", background="#FFE0B2")
         
         self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
@@ -125,9 +142,12 @@ class App:
             column = self.tree.identify_column(event.x)
             if column == "#1":  # 'select' column
                 item_id = self.tree.identify_row(event.y)
+                tags = self.tree.item(item_id, "tags")
+                if "cancelled" in tags:
+                    return  # cancelled orders cannot be queued for printing
                 current_val = self.tree.item(item_id, "values")[0]
                 new_val = " " if current_val == "✔" else "✔"
-                
+
                 # Update the row values
                 vals = list(self.tree.item(item_id, "values"))
                 vals[0] = new_val
@@ -654,6 +674,8 @@ class App:
             self.btn_manual.config(state=tk.DISABLED, bg="SystemButtonFace")
         if hasattr(self, 'chk_shipped'):
             self.chk_shipped.config(state=tk.DISABLED)
+        if hasattr(self, 'btn_select_due'):
+            self.btn_select_due.config(state=tk.DISABLED)
         self.btn_a4.config(state=tk.DISABLED, bg="SystemButtonFace")
         self.btn_a3.config(state=tk.DISABLED, bg="SystemButtonFace")
 
@@ -664,6 +686,8 @@ class App:
             self.btn_manual.config(state=tk.NORMAL, bg="#8E44AD", fg="white")
         if hasattr(self, 'chk_shipped'):
             self.chk_shipped.config(state=tk.NORMAL)
+        if hasattr(self, 'btn_select_due') and self.current_items:
+            self.btn_select_due.config(state=tk.NORMAL)
         if a4_count > 0:
             self.btn_a4.config(state=tk.NORMAL, bg="#3498DB", fg="white")
         else:
@@ -696,7 +720,7 @@ class App:
             self.log(f"Fetched {len(raw_items)} order line items from Amazon.")
 
             if not raw_items:
-                self.log("No pending/unshipped orders found on Amazon.", is_error=True)
+                self.log("No orders found on Amazon.", is_error=True)
                 self.enable_inputs(0, 0)
                 return
 
@@ -724,6 +748,7 @@ class App:
             qty = int(raw.get('qty', 1))
             sku = raw.get('sku', '')
             order_status = raw.get('order_status', 'Unshipped')
+            latest_ship_date = raw.get('latest_ship_date', '')
 
             # Strip 'Wrap & Wish' prefix if already present in title
             clean_title = re.sub(r'^Wrap\s*&\s*Wish\s*', '', full_title, flags=re.IGNORECASE).strip()
@@ -777,8 +802,9 @@ class App:
 
             self.log(f"Parsed: '{clean_title}' | Size: {size} | Cat: {category} | Pack: {pack_val} | Qty: {qty}")
 
-            # Expand by quantity (qty=2 means 2 copies to print)
-            for _ in range(qty):
+            # Cancelled orders: show one row only (for warning purposes, not printing)
+            copies = 1 if order_status == 'Cancelled' else qty
+            for _ in range(copies):
                 output.append({
                     'searchTitle': clean_title,
                     'size': size,
@@ -786,36 +812,134 @@ class App:
                     'sku': sku,
                     'category': category,
                     'order_status': order_status,
+                    'latest_ship_date': latest_ship_date,
                 })
 
         return output
 
     def _display_queue_summary(self, source="Invoice"):
         """Log the queue counts and update buttons after loading."""
-        # Clear previous items in tree
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        # Populate tree with all items, selected by default
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        due_today_count = 0
+        cancelled_titles = []
+
         for item in self.current_items:
             pack_display = f"×{item['pack']}" if item.get('pack') else "—"
             order_status = item.get('order_status', 'Unshipped')
-            tag = ("shipped",) if order_status == "Shipped" else ()
+            raw_date = item.get('latest_ship_date', '')
+
+            # Determine ship_by display value and row tag
+            if order_status == 'Cancelled':
+                ship_by_display = "CANCELLED"
+                tag = ("cancelled",)
+                check = " "
+                cancelled_titles.append(item['searchTitle'])
+            elif order_status == 'Shipped':
+                ship_by_display = "SHIPPED"
+                tag = ("shipped",)
+                check = "✔"
+            else:
+                # Parse ISO date to local date string
+                ship_date_str = raw_date[:10] if raw_date else ""
+                if ship_date_str:
+                    try:
+                        sd = datetime.strptime(ship_date_str, "%Y-%m-%d")
+                        ship_by_display = sd.strftime("%d %b")
+                    except ValueError:
+                        ship_by_display = ship_date_str
+                    if ship_date_str == today_str:
+                        tag = ("due_today",)
+                        due_today_count += 1
+                    elif ship_date_str < today_str:
+                        tag = ("overdue",)
+                        due_today_count += 1  # overdue also needs printing today
+                    else:
+                        tag = ()
+                else:
+                    ship_by_display = "—"
+                    tag = ()
+                check = "✔"
+
             self.tree.insert("", tk.END, tags=tag, values=(
-                "✔",
+                check,
                 item['searchTitle'],
                 item['size'],
                 pack_display,
                 item['category'].upper(),
-                order_status.upper(),
+                ship_by_display,
             ))
 
         self.update_button_counts()
-        
+
+        # Update summary label
+        active_items = [x for x in self.current_items if x.get('order_status') != 'Cancelled']
+        cancelled_count = len(self.current_items) - len(active_items)
+        summary_parts = [f"Due today/overdue: {due_today_count}", f"Total active: {len(active_items)}"]
+        if cancelled_count:
+            summary_parts.append(f"⚠ {cancelled_count} Cancelled")
+        self.summary_label.config(text="  |  ".join(summary_parts), fg="#CC0000" if cancelled_count else "#555555")
+
         music_items = [x for x in self.current_items if x['category'] == 'music']
-        self.log(f"[{source}] Total items: {len(self.current_items)}")
-        self.log(f">> Music classification: {len(music_items)} items detected.")
+        self.log(f"[{source}] Total active items: {len(active_items)}")
+        self.log(f">> Due today / overdue: {due_today_count} | Music: {len(music_items)}")
+
+        if cancelled_titles:
+            self.log(f"⚠ WARNING: {len(cancelled_titles)} CANCELLED order line(s) detected — check if already printed:", is_error=True)
+            for t in cancelled_titles:
+                self.log(f"   CANCELLED: {t}", is_error=True)
+
         self.log("Ready for printing! Load paper and press Print button.")
+
+    def select_by_date(self):
+        """Check all active items due on or before the entered ship-by date; uncheck the rest."""
+        raw = self.ship_date_var.get().strip()
+        cutoff = None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                cutoff = datetime.strptime(raw, fmt)
+                break
+            except ValueError:
+                continue
+        if not cutoff:
+            messagebox.showerror("Invalid Date", f"Could not parse '{raw}'. Use DD/MM/YYYY.")
+            return
+
+        cutoff_str = cutoff.strftime("%Y-%m-%d")
+        changed = 0
+        for child in self.tree.get_children():
+            vals = list(self.tree.item(child, "values"))
+            ship_by_display = vals[5]  # "DD Mon", "SHIPPED", "CANCELLED", "—"
+            tags = self.tree.item(child, "tags")
+
+            if "cancelled" in tags:
+                continue  # never toggle cancelled rows
+
+            # Determine the item's date from the matching current_items entry
+            title = vals[1]
+            matched = next((x for x in self.current_items if x['searchTitle'] == title and x.get('order_status') != 'Cancelled'), None)
+            if not matched:
+                continue
+
+            raw_date = matched.get('latest_ship_date', '')
+            item_date_str = raw_date[:10] if raw_date else ""
+
+            if item_date_str and item_date_str <= cutoff_str:
+                new_check = "✔"
+            elif not item_date_str:
+                new_check = "✔"  # no date info — keep selected
+            else:
+                new_check = " "
+
+            if vals[0] != new_check:
+                vals[0] = new_check
+                self.tree.item(child, values=vals)
+                changed += 1
+
+        self.update_button_counts()
+        self.log(f"Selected items due on or before {cutoff.strftime('%d %b %Y')} ({changed} rows changed).")
 
     def open_manual_dialog(self):
         popup = tk.Toplevel(self.root)
