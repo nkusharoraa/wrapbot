@@ -802,7 +802,7 @@ class App:
             self.log(f"Parsed: '{clean_title}' | Size: {size} | Cat: {category} | Pack: {pack_val} | Qty: {qty}")
 
             # Cancelled orders: show one row only (for warning purposes, not printing)
-            copies = 1 if order_status == 'Cancelled' else qty
+            copies = 1 if order_status == 'Canceled' else qty
             for _ in range(copies):
                 output.append({
                     'searchTitle': clean_title,
@@ -831,7 +831,7 @@ class App:
             raw_date = item.get('latest_ship_date', '')
             ship_date_str = raw_date[:10] if raw_date else ""
 
-            if order_status == 'Cancelled':
+            if order_status == 'Canceled':
                 # Only show cancelled orders whose ship-by date is today or already past
                 if ship_date_str and ship_date_str > today_str:
                     continue  # future ship date — not relevant yet
@@ -889,11 +889,11 @@ class App:
 
         self.update_button_counts()
 
-        active_items = [x for x in self.current_items if x.get('order_status') != 'Cancelled']
+        active_items = [x for x in self.current_items if x.get('order_status') != 'Canceled']
         cancelled_count = len(cancelled_titles)
         due_count = sum(
             1 for x in self.current_items
-            if x.get('order_status') not in ('Cancelled', 'Shipped')
+            if x.get('order_status') not in ('Canceled', 'Shipped')
             and (x.get('latest_ship_date', '')[:10] or 'z') <= today_str
         )
 
@@ -938,7 +938,7 @@ class App:
 
             # Determine the item's date from the matching current_items entry
             title = vals[1]
-            matched = next((x for x in self.current_items if x['searchTitle'] == title and x.get('order_status') != 'Cancelled'), None)
+            matched = next((x for x in self.current_items if x['searchTitle'] == title and x.get('order_status') != 'Canceled'), None)
             if not matched:
                 continue
 
