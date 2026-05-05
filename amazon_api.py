@@ -130,11 +130,8 @@ def get_order_items(order_id, config=None, access_token=None):
 
 def fetch_all_pending_items(include_shipped=False):
     """
-    Orchestrator: fetches orders then retrieves items for each.
-    Returns a flat list of dicts:
-      {title, qty, sku, order_id, asin, order_status, latest_ship_date}
-    Cancelled orders from the last 7 days are always included so the UI can
-    warn the user about anything they may have already printed.
+    Fetches Unshipped orders (and optionally Shipped) with their ship-by date.
+    Returns a flat list of dicts: {title, qty, sku, order_id, asin, order_status, latest_ship_date}
     """
     config = load_config()
     access_token = get_access_token(config)
@@ -143,28 +140,22 @@ def fetch_all_pending_items(include_shipped=False):
     if include_shipped:
         statuses.append("Shipped")
 
-    active_orders = get_unshipped_orders(config, access_token, statuses=statuses)
-    cancelled_orders = get_unshipped_orders(config, access_token, statuses=["Canceled"], days_window=30)
+    orders = get_unshipped_orders(config, access_token, statuses=statuses)
     result = []
 
-    for order in active_orders + cancelled_orders:
+    for order in orders:
         order_id = order.get("AmazonOrderId", "")
         order_status = order.get("OrderStatus", "Unshipped")
         latest_ship_date = order.get("LatestShipDate", "")
         items = get_order_items(order_id, config, access_token)
 
         for item in items:
-            title = item.get("Title", "")
-            qty = item.get("QuantityOrdered", 1)
-            sku = item.get("SellerSKU", "")
-            asin = item.get("ASIN", "")
-
             result.append({
-                "title": title,
-                "qty": qty,
-                "sku": sku,
+                "title": item.get("Title", ""),
+                "qty": item.get("QuantityOrdered", 1),
+                "sku": item.get("SellerSKU", ""),
                 "order_id": order_id,
-                "asin": asin,
+                "asin": item.get("ASIN", ""),
                 "order_status": order_status,
                 "latest_ship_date": latest_ship_date,
             })
