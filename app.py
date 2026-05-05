@@ -87,11 +87,10 @@ class App:
         filter_frame.pack(padx=10, pady=(0, 3), fill=tk.X)
 
         tk.Label(filter_frame, text="Ship by:", font=("Arial", 9)).pack(side=tk.LEFT)
-        self.ship_date_var = tk.StringVar(value=datetime.now().strftime("%d/%m/%Y"))
-        self.ship_date_entry = tk.Entry(filter_frame, textvariable=self.ship_date_var, width=10, font=("Arial", 9))
-        self.ship_date_entry.pack(side=tk.LEFT, padx=(3, 5))
-        self.btn_select_due = tk.Button(filter_frame, text="Select Due", command=self.select_by_date, font=("Arial", 9), state=tk.DISABLED)
-        self.btn_select_due.pack(side=tk.LEFT, padx=(0, 10))
+        self.ship_date_var = tk.StringVar()
+        self.ship_date_combo = ttk.Combobox(filter_frame, textvariable=self.ship_date_var, state="disabled", width=12, font=("Arial", 9))
+        self.ship_date_combo.pack(side=tk.LEFT, padx=(3, 10))
+        self.ship_date_combo.bind("<<ComboboxSelected>>", lambda e: self.select_by_date())
 
         self.summary_label = tk.Label(filter_frame, text="", font=("Arial", 9), fg="#555555")
         self.summary_label.pack(side=tk.LEFT)
@@ -674,8 +673,8 @@ class App:
             self.btn_manual.config(state=tk.DISABLED, bg="SystemButtonFace")
         if hasattr(self, 'chk_shipped'):
             self.chk_shipped.config(state=tk.DISABLED)
-        if hasattr(self, 'btn_select_due'):
-            self.btn_select_due.config(state=tk.DISABLED)
+        if hasattr(self, 'ship_date_combo'):
+            self.ship_date_combo.config(state="disabled")
         self.btn_a4.config(state=tk.DISABLED, bg="SystemButtonFace")
         self.btn_a3.config(state=tk.DISABLED, bg="SystemButtonFace")
 
@@ -686,8 +685,8 @@ class App:
             self.btn_manual.config(state=tk.NORMAL, bg="#8E44AD", fg="white")
         if hasattr(self, 'chk_shipped'):
             self.chk_shipped.config(state=tk.NORMAL)
-        if hasattr(self, 'btn_select_due') and self.current_items:
-            self.btn_select_due.config(state=tk.NORMAL)
+        if hasattr(self, 'ship_date_combo') and self.current_items:
+            self.ship_date_combo.config(state="readonly")
         if a4_count > 0:
             self.btn_a4.config(state=tk.NORMAL, bg="#3498DB", fg="white")
         else:
@@ -823,39 +822,39 @@ class App:
             self.tree.delete(item)
 
         today_str = datetime.now().strftime("%Y-%m-%d")
-        due_today_count = 0
         cancelled_titles = []
+        unshipped_dates = set()  # collect unique ship dates for the combobox
 
         for item in self.current_items:
             pack_display = f"×{item['pack']}" if item.get('pack') else "—"
             order_status = item.get('order_status', 'Unshipped')
             raw_date = item.get('latest_ship_date', '')
+            ship_date_str = raw_date[:10] if raw_date else ""
 
-            # Determine ship_by display value and row tag
             if order_status == 'Cancelled':
+                # Only show cancelled orders whose ship-by date is today or already past
+                if ship_date_str and ship_date_str > today_str:
+                    continue  # future ship date — not relevant yet
                 ship_by_display = "CANCELLED"
                 tag = ("cancelled",)
                 check = " "
                 cancelled_titles.append(item['searchTitle'])
+
             elif order_status == 'Shipped':
                 ship_by_display = "SHIPPED"
                 tag = ("shipped",)
                 check = "✔"
-            else:
-                # Parse ISO date to local date string
-                ship_date_str = raw_date[:10] if raw_date else ""
+
+            else:  # Unshipped
                 if ship_date_str:
                     try:
                         sd = datetime.strptime(ship_date_str, "%Y-%m-%d")
-                        ship_by_display = sd.strftime("%d %b")
+                        ship_by_display = sd.strftime("%d %b %Y")
                     except ValueError:
                         ship_by_display = ship_date_str
-                    if ship_date_str == today_str:
-                        tag = ("due_today",)
-                        due_today_count += 1
-                    elif ship_date_str < today_str:
-                        tag = ("overdue",)
-                        due_today_count += 1  # overdue also needs printing today
+                    unshipped_dates.add(ship_date_str)
+                    if ship_date_str <= today_str:
+                        tag = ("overdue",) if ship_date_str < today_str else ("due_today",)
                     else:
                         tag = ()
                 else:
@@ -872,39 +871,59 @@ class App:
                 ship_by_display,
             ))
 
+        # Populate date combobox with sorted unshipped dates; default to nearest (earliest)
+        sorted_dates = sorted(unshipped_dates)
+        combo_values = []
+        for d in sorted_dates:
+            try:
+                combo_values.append(datetime.strptime(d, "%Y-%m-%d").strftime("%d %b %Y"))
+            except ValueError:
+                combo_values.append(d)
+
+        if hasattr(self, 'ship_date_combo'):
+            self.ship_date_combo['values'] = combo_values
+            if combo_values:
+                self.ship_date_combo.config(state="readonly")
+                self.ship_date_var.set(combo_values[0])  # nearest date
+                self.select_by_date()  # auto-apply
+
         self.update_button_counts()
 
-        # Update summary label
         active_items = [x for x in self.current_items if x.get('order_status') != 'Cancelled']
-        cancelled_count = len(self.current_items) - len(active_items)
-        summary_parts = [f"Due today/overdue: {due_today_count}", f"Total active: {len(active_items)}"]
+        cancelled_count = len(cancelled_titles)
+        due_count = sum(
+            1 for x in self.current_items
+            if x.get('order_status') not in ('Cancelled', 'Shipped')
+            and (x.get('latest_ship_date', '')[:10] or 'z') <= today_str
+        )
+
+        summary_parts = [f"Nearest date: {combo_values[0] if combo_values else '—'}", f"Total active: {len(active_items)}"]
         if cancelled_count:
             summary_parts.append(f"⚠ {cancelled_count} Cancelled")
         self.summary_label.config(text="  |  ".join(summary_parts), fg="#CC0000" if cancelled_count else "#555555")
 
         music_items = [x for x in self.current_items if x['category'] == 'music']
-        self.log(f"[{source}] Total active items: {len(active_items)}")
-        self.log(f">> Due today / overdue: {due_today_count} | Music: {len(music_items)}")
+        self.log(f"[{source}] Total active items: {len(active_items)} | Due today/overdue: {due_count} | Music: {len(music_items)}")
 
         if cancelled_titles:
-            self.log(f"⚠ WARNING: {len(cancelled_titles)} CANCELLED order line(s) detected — check if already printed:", is_error=True)
+            self.log(f"⚠ WARNING: {len(cancelled_titles)} CANCELLED order(s) with past/today ship date — check if already printed:", is_error=True)
             for t in cancelled_titles:
                 self.log(f"   CANCELLED: {t}", is_error=True)
 
         self.log("Ready for printing! Load paper and press Print button.")
 
     def select_by_date(self):
-        """Check all active items due on or before the entered ship-by date; uncheck the rest."""
+        """Check all active items due on or before the selected ship-by date; uncheck the rest."""
         raw = self.ship_date_var.get().strip()
         cutoff = None
-        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        for fmt in ("%d %b %Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
             try:
                 cutoff = datetime.strptime(raw, fmt)
                 break
             except ValueError:
                 continue
         if not cutoff:
-            messagebox.showerror("Invalid Date", f"Could not parse '{raw}'. Use DD/MM/YYYY.")
+            messagebox.showerror("Invalid Date", f"Could not parse '{raw}'.")
             return
 
         cutoff_str = cutoff.strftime("%Y-%m-%d")
