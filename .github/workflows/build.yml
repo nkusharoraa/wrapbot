@@ -31,5 +31,4 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>$null; true
           gh release create latest dist/WrapBot.exe `
             --title "WrapBot latest" `
-            --notes "Built from ${{ github.sha }}" `
-            --prerelease
+            --notes "Built from ${{ github.sha }}"
