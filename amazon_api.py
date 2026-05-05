@@ -61,12 +61,14 @@ def _sp_api_get(endpoint, path, access_token, params=None):
     return resp.json()
 
 
-def get_unshipped_orders(config=None, access_token=None):
-    """Fetch all Unshipped orders from India marketplace, handling pagination."""
+def get_unshipped_orders(config=None, access_token=None, statuses=None):
+    """Fetch orders from India marketplace for the given statuses, handling pagination."""
     if config is None:
         config = load_config()
     if access_token is None:
         access_token = get_access_token(config)
+    if statuses is None:
+        statuses = ["Unshipped"]
 
     endpoint = config["endpoint"]
     marketplace_id = config["marketplace_id"]
@@ -74,7 +76,7 @@ def get_unshipped_orders(config=None, access_token=None):
     created_after = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     all_orders = []
-    for status in ["Unshipped"]:
+    for status in statuses:
         params = {
             "MarketplaceIds": marketplace_id,
             "OrderStatuses": status,
@@ -127,19 +129,24 @@ def get_order_items(order_id, config=None, access_token=None):
     return all_items
 
 
-def fetch_all_pending_items():
+def fetch_all_pending_items(include_shipped=False):
     """
-    Orchestrator: fetches all unshipped orders, then retrieves items for each.
-    Returns a flat list of dicts: {title, qty, sku, order_id, asin}
+    Orchestrator: fetches orders then retrieves items for each.
+    Returns a flat list of dicts: {title, qty, sku, order_id, asin, order_status}
     """
     config = load_config()
     access_token = get_access_token(config)
 
-    orders = get_unshipped_orders(config, access_token)
+    statuses = ["Unshipped"]
+    if include_shipped:
+        statuses.append("Shipped")
+
+    orders = get_unshipped_orders(config, access_token, statuses=statuses)
     result = []
 
     for order in orders:
         order_id = order.get("AmazonOrderId", "")
+        order_status = order.get("OrderStatus", "Unshipped")
         items = get_order_items(order_id, config, access_token)
 
         for item in items:
@@ -154,6 +161,7 @@ def fetch_all_pending_items():
                 "sku": sku,
                 "order_id": order_id,
                 "asin": asin,
+                "order_status": order_status,
             })
 
     return result
