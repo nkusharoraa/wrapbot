@@ -61,7 +61,7 @@ def _sp_api_get(endpoint, path, access_token, params=None):
     return resp.json()
 
 
-def get_unshipped_orders(config=None, access_token=None, statuses=None):
+def get_unshipped_orders(config=None, access_token=None, statuses=None, days_window=90):
     """Fetch orders from India marketplace for the given statuses, handling pagination."""
     if config is None:
         config = load_config()
@@ -72,8 +72,7 @@ def get_unshipped_orders(config=None, access_token=None, statuses=None):
 
     endpoint = config["endpoint"]
     marketplace_id = config["marketplace_id"]
-    # SP-API requires CreatedAfter; use 90-day window to catch all actionable orders
-    created_after = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%dT%H:%M:%SZ')
+    created_after = (datetime.now(timezone.utc) - timedelta(days=days_window)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     all_orders = []
     for status in statuses:
@@ -132,7 +131,10 @@ def get_order_items(order_id, config=None, access_token=None):
 def fetch_all_pending_items(include_shipped=False):
     """
     Orchestrator: fetches orders then retrieves items for each.
-    Returns a flat list of dicts: {title, qty, sku, order_id, asin, order_status}
+    Returns a flat list of dicts:
+      {title, qty, sku, order_id, asin, order_status, latest_ship_date}
+    Cancelled orders from the last 7 days are always included so the UI can
+    warn the user about anything they may have already printed.
     """
     config = load_config()
     access_token = get_access_token(config)
@@ -141,12 +143,14 @@ def fetch_all_pending_items(include_shipped=False):
     if include_shipped:
         statuses.append("Shipped")
 
-    orders = get_unshipped_orders(config, access_token, statuses=statuses)
+    active_orders = get_unshipped_orders(config, access_token, statuses=statuses)
+    cancelled_orders = get_unshipped_orders(config, access_token, statuses=["Cancelled"], days_window=7)
     result = []
 
-    for order in orders:
+    for order in active_orders + cancelled_orders:
         order_id = order.get("AmazonOrderId", "")
         order_status = order.get("OrderStatus", "Unshipped")
+        latest_ship_date = order.get("LatestShipDate", "")
         items = get_order_items(order_id, config, access_token)
 
         for item in items:
@@ -162,6 +166,7 @@ def fetch_all_pending_items(include_shipped=False):
                 "order_id": order_id,
                 "asin": asin,
                 "order_status": order_status,
+                "latest_ship_date": latest_ship_date,
             })
 
     return result
