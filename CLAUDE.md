@@ -60,6 +60,19 @@ Three loosely-coupled pieces:
 - **token.json** — cached Google user token, refreshed on startup.
 - **.env** — only consumed by `auto_print.py` (`PRINT_QUEUE_PATH`, `PRINTER_NAME`). The GUI app does not read `.env`.
 
+## Release workflow
+
+CI builds `WrapBot.exe` on every push to `master` and overwrites a rolling **pre-release** tagged `latest`. This is the "always up to date" download but not considered stable.
+
+To cut a **stable release**, push a version tag from your local machine:
+
+```bash
+git tag v1.1
+git push origin v1.1
+```
+
+This triggers a second CI path that creates a permanent release named `v1.1`. The `latest` pre-release continues to roll independently. Never manually upload exe files to releases — always let CI build them so the binary matches the source.
+
 ## Platform notes
 
 - Hard Windows dependency via `win32print` / `win32ui` / `win32con` / `win32gui` — the app cannot run or be meaningfully tested on Linux/macOS.
