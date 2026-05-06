@@ -1090,7 +1090,7 @@ class App:
                 if vals[0] == "✔" and vals[2] == paper_size:
                     # Find the original item data by index or match (here we use simple match for title/size/cat)
                     title = vals[1]
-                    cat = vals[3].lower()
+                    cat = vals[4].lower()
                     
                     # Search current_items for the actual metadata needs (pack, sku)
                     orig_item = next((x for x in self.current_items if x['searchTitle'] == title and x['size'] == paper_size and x['category'] == cat), None)
