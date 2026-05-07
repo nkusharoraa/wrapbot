@@ -145,7 +145,7 @@ def fetch_all_pending_items(include_shipped=False):
 
     orders = get_unshipped_orders(config, access_token, statuses=["Unshipped"])
     if include_shipped:
-        shipped = get_unshipped_orders(config, access_token, statuses=["Shipped"], days_window=7)
+        shipped = get_unshipped_orders(config, access_token, statuses=["Shipped"], days_window=1)
         orders.extend(shipped)
     result = []
 
