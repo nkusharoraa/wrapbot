@@ -1088,12 +1088,13 @@ class App:
             for child in self.tree.get_children():
                 vals = self.tree.item(child, "values")
                 if vals[0] == "✔" and vals[2] == paper_size:
-                    # Find the original item data by index or match (here we use simple match for title/size/cat)
                     title = vals[1]
                     cat = vals[4].lower()
-                    
+                    pack_display = vals[3]
+                    pack_val = int(pack_display[1:]) if pack_display and pack_display.startswith('×') else 0
+
                     # Search current_items for the actual metadata needs (pack, sku)
-                    orig_item = next((x for x in self.current_items if x['searchTitle'] == title and x['size'] == paper_size and x['category'] == cat), None)
+                    orig_item = next((x for x in self.current_items if x['searchTitle'] == title and x['size'] == paper_size and x['category'] == cat and x['pack'] == pack_val), None)
                     if orig_item:
                         items_to_print.append(orig_item)
             
