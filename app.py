@@ -64,9 +64,6 @@ class App:
         self.btn_fetch = tk.Button(btn_frame, text="Load Orders", command=self.start_fetch_orders, bg="#2C3E50", fg="white", font=("Arial", 10, "bold"))
         self.btn_fetch.pack(side=tk.LEFT, padx=(0, 5))
 
-        self.include_shipped_var = tk.BooleanVar(value=False)
-        self.chk_shipped = tk.Checkbutton(btn_frame, text="Include Shipped", variable=self.include_shipped_var, font=("Arial", 9))
-        self.chk_shipped.pack(side=tk.LEFT, padx=(0, 5))
 
         self.btn_select = tk.Button(btn_frame, text="Load PDF (Fallback)", command=self.start_analyze, bg="#7F8C8D", fg="white", font=("Arial", 10))
         self.btn_select.pack(side=tk.LEFT, padx=5)
@@ -709,9 +706,8 @@ class App:
 
             self.get_master_folders()
 
-            include_shipped = self.include_shipped_var.get()
             self.log("Connecting to Amazon SP-API...")
-            raw_items = amazon_api.fetch_all_pending_items(include_shipped=include_shipped)
+            raw_items = amazon_api.fetch_all_pending_items()
             self.log(f"Fetched {len(raw_items)} order line items from Amazon.")
 
             if not raw_items:
