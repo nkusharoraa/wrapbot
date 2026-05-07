@@ -7,10 +7,15 @@ import json
 from datetime import datetime, timezone, timedelta
 import os
 import sys
+import time
 import requests
+from requests.exceptions import ConnectionError, Timeout
 
 
 LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
+_REQUEST_TIMEOUT = 30  # seconds
+_MAX_RETRIES = 5
+_RETRY_STATUSES = {429, 500, 502, 503, 504}
 
 
 def _get_config_path():
@@ -43,22 +48,37 @@ def get_access_token(config=None):
         "client_secret": config["client_secret"],
     }
 
-    resp = requests.post(LWA_TOKEN_URL, data=payload)
+    resp = requests.post(LWA_TOKEN_URL, data=payload, timeout=_REQUEST_TIMEOUT)
     resp.raise_for_status()
     data = resp.json()
     return data["access_token"]
 
 
 def _sp_api_get(endpoint, path, access_token, params=None):
-    """Make an authenticated GET request to the SP-API."""
+    """Make an authenticated GET request to the SP-API with retry/backoff."""
     url = f"{endpoint}{path}"
     headers = {
         "x-amz-access-token": access_token,
         "Content-Type": "application/json",
     }
-    resp = requests.get(url, headers=headers, params=params)
-    resp.raise_for_status()
-    return resp.json()
+    delay = 2
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = requests.get(url, headers=headers, params=params, timeout=_REQUEST_TIMEOUT)
+            if resp.status_code in _RETRY_STATUSES and attempt < _MAX_RETRIES - 1:
+                # Honour Retry-After if provided (common on 429)
+                retry_after = resp.headers.get("Retry-After")
+                sleep_secs = float(retry_after) if retry_after else delay
+                time.sleep(sleep_secs)
+                delay *= 2
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except (ConnectionError, Timeout):
+            if attempt == _MAX_RETRIES - 1:
+                raise
+            time.sleep(delay)
+            delay *= 2
 
 
 def get_unshipped_orders(config=None, access_token=None, statuses=None, days_window=90):
