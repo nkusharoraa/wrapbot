@@ -4,6 +4,7 @@ Handles LWA authentication and Orders API calls for India marketplace.
 """
 
 import json
+import time
 from datetime import datetime, timezone, timedelta
 import os
 import sys
@@ -50,15 +51,21 @@ def get_access_token(config=None):
 
 
 def _sp_api_get(endpoint, path, access_token, params=None):
-    """Make an authenticated GET request to the SP-API."""
+    """Make an authenticated GET request to the SP-API, retrying on 429."""
     url = f"{endpoint}{path}"
     headers = {
         "x-amz-access-token": access_token,
         "Content-Type": "application/json",
     }
-    resp = requests.get(url, headers=headers, params=params)
+    for attempt in range(5):
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        if resp.status_code == 429:
+            wait = 2 ** attempt
+            time.sleep(wait)
+            continue
+        resp.raise_for_status()
+        return resp.json()
     resp.raise_for_status()
-    return resp.json()
 
 
 def get_unshipped_orders(config=None, access_token=None, statuses=None, days_window=90):
@@ -136,11 +143,10 @@ def fetch_all_pending_items(include_shipped=False):
     config = load_config()
     access_token = get_access_token(config)
 
-    statuses = ["Unshipped"]
+    orders = get_unshipped_orders(config, access_token, statuses=["Unshipped"])
     if include_shipped:
-        statuses.append("Shipped")
-
-    orders = get_unshipped_orders(config, access_token, statuses=statuses)
+        shipped = get_unshipped_orders(config, access_token, statuses=["Shipped"], days_window=7)
+        orders.extend(shipped)
     result = []
 
     for order in orders:
