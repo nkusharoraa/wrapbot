@@ -1041,9 +1041,11 @@ class App:
             info = win32print.GetPrinter(hprinter, 2)
             dm = info['pDevMode']
             
-            # 2. Open the UI. This specific combination (dm, dm, 5) is proven to show the window.
-            # fMode 5 = DM_IN_PROMPT (1) | DM_OUT_DEFAULT (4). Returns integer status.
-            status = win32print.DocumentProperties(0, hprinter, printer_name, dm, dm, 5)
+            # 2. Open the UI and write the user's selections back into dm.
+            # fMode 6 = DM_IN_PROMPT (4) | DM_OUT_BUFFER (2). Without DM_OUT_BUFFER the
+            # dialog's choices (e.g. Borderless) never reach dm, so the captured preset
+            # ends up holding the pre-dialog values.
+            status = win32print.DocumentProperties(0, hprinter, printer_name, dm, dm, 6)
             
             if status == 1: # IDOK (User clicked OK)
                 # Capture the confirmed state to update memory
