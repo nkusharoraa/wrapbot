@@ -13,6 +13,16 @@ import requests
 
 LWA_TOKEN_URL = "https://api.amazon.com/auth/o2/token"
 
+# (connect timeout, read timeout) in seconds. Connect is short so a dead route
+# fails fast and we can retry; read is generous since SP-API can be slow.
+REQUEST_TIMEOUT = (15, 60)
+MAX_NETWORK_RETRIES = 5
+TRANSIENT_NETWORK_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
 
 def _get_config_path():
     """Resolve the path to amazon_config.json relative to the executable or script."""
@@ -44,27 +54,52 @@ def get_access_token(config=None):
         "client_secret": config["client_secret"],
     }
 
-    resp = requests.post(LWA_TOKEN_URL, data=payload)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["access_token"]
+    last_exc = None
+    for attempt in range(MAX_NETWORK_RETRIES):
+        try:
+            resp = requests.post(LWA_TOKEN_URL, data=payload, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            return resp.json()["access_token"]
+        except TRANSIENT_NETWORK_ERRORS as e:
+            last_exc = e
+            if attempt == MAX_NETWORK_RETRIES - 1:
+                break
+            time.sleep(2 ** attempt)
+    raise last_exc
 
 
 def _sp_api_get(endpoint, path, access_token, params=None):
-    """Make an authenticated GET request to the SP-API, retrying on 429."""
+    """GET from SP-API, retrying on 429s, 5xx, and transient network errors."""
     url = f"{endpoint}{path}"
     headers = {
         "x-amz-access-token": access_token,
         "Content-Type": "application/json",
     }
-    for attempt in range(5):
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
-        if resp.status_code == 429:
-            wait = 2 ** attempt
-            time.sleep(wait)
+    last_exc = None
+    for attempt in range(MAX_NETWORK_RETRIES):
+        try:
+            resp = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=REQUEST_TIMEOUT,
+            )
+        except TRANSIENT_NETWORK_ERRORS as e:
+            last_exc = e
+            if attempt == MAX_NETWORK_RETRIES - 1:
+                raise
+            time.sleep(2 ** attempt)
+            continue
+
+        if resp.status_code == 429 or 500 <= resp.status_code < 600:
+            if attempt == MAX_NETWORK_RETRIES - 1:
+                resp.raise_for_status()
+            time.sleep(2 ** attempt)
             continue
         resp.raise_for_status()
         return resp.json()
+    if last_exc is not None:
+        raise last_exc
     resp.raise_for_status()
 
 
